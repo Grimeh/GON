@@ -6,62 +6,71 @@
 #include <map>
 #include <vector>
 
+struct TokenStream;
+
 class GonObject {
+    std::map<std::string, size_t> children_map;
+    std::vector<GonObject> children_array;
+    std::string string_data;
+    int64_t int_data;
+    double float_data;
+    bool bool_data;
+
+    static GonObject LoadFromTokens(TokenStream& Tokens);
+    static void DefaultErrorCallback(const char* msg);
+
     public:
-        enum gon_type {
-            g_null,
+        enum class Type {
+            Null,
 
-            g_string,
-            g_number,
-            g_object,
-            g_array,
-            g_bool
+            String,
+            Number,
+            Object,
+            Array,
+            Bool
         };
+        Type type;
 
-        std::map<std::string, int> children_map;
-        std::vector<GonObject> children_array;
-        int int_data;
-        double float_data;
-        bool bool_data;
-        std::string string_data;
+        std::string name;
 
         static GonObject null_gon;
+
+        using ErrorCallback = void(*)(const char*);
+        static ErrorCallback error_callback;
 
     public:
         static GonObject Load(std::string filename);
         static GonObject LoadFromBuffer(std::string buffer);
-
-        std::string name;
-        int type;
 
         GonObject();
 
         //throw error if accessing wrong type, otherwise return correct type
         std::string String() const;
         int Int() const;
+        uint32_t UInt() const;
         double Number() const;
         bool Bool() const;
 
         //returns a default value if the field doesn't exist or is the wrong type
-        std::string String(std::string _default) const;
+        std::string String(const std::string& _default) const;
         int Int(int _default) const;
         double Number(double _default) const;
         bool Bool(bool _default) const;
 
-        bool Contains(std::string child) const;
+        bool Contains(const std::string& child) const;
         bool Contains(int child) const;
         bool Exists() const; //true if non-null
 
         //returns null_gon if the field does not exist. 
-        const GonObject& operator[](std::string child) const;
+        const GonObject& operator[](const std::string& child) const;
 
         //returns self if index is not an array, 
         //all objects can be considered an array of size 1 with themselves as the member
         const GonObject& operator[](int childindex) const;
-        int Length() const;
+        size_t Length() const;
 
         void DebugOut();
 
-        void Save(std::string outfilename);
+        void Save(const std::string& outfilename);
         std::string getOutStr();
 };

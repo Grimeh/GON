@@ -5,6 +5,8 @@
 #include <string>
 #include <cstdlib>
 
+GonObject::ErrorCallback GonObject::error_callback = GonObject::DefaultErrorCallback;
+
 bool IsWhitespace(char c){
     return c==' '||c=='\n'||c=='\r'||c=='\t';
 }
@@ -26,7 +28,7 @@ std::vector<std::string> Tokenize(std::string data){
     for(int i = 0; i<data.size(); i++){
         if(!inString && !inComment){
             if(IsSymbol(data[i])){
-                if(current_token != ""){
+                if(!current_token.empty()){
                     tokens.push_back(current_token);
                     current_token = "";
                 }
@@ -40,7 +42,7 @@ std::vector<std::string> Tokenize(std::string data){
             }
 
             if(IsWhitespace(data[i])){
-                if(current_token != ""){
+                if(!current_token.empty()){
                     tokens.push_back(current_token);
                     current_token = "";
                 }
@@ -49,7 +51,7 @@ std::vector<std::string> Tokenize(std::string data){
             }
 
             if(data[i] == '#'){
-                if(current_token != ""){
+                if(!current_token.empty()){
                     tokens.push_back(current_token);
                     current_token = "";
                 }
@@ -58,7 +60,7 @@ std::vector<std::string> Tokenize(std::string data){
                 continue;
             }
             if(data[i] == '"'){
-                if(current_token != ""){
+                if(!current_token.empty()){
                     tokens.push_back(current_token);
                     current_token = "";
                 }
@@ -82,7 +84,7 @@ std::vector<std::string> Tokenize(std::string data){
             } else if(data[i] == '\\'){
                 escaped = true;
             } else if(!escaped && data[i] == '"'){
-                if(current_token != ""){
+                if(!current_token.empty()){
                     tokens.push_back(current_token);
                     current_token = "";
                 }
@@ -107,7 +109,7 @@ std::vector<std::string> Tokenize(std::string data){
 
 struct TokenStream {
     std::vector<std::string> Tokens;
-    int current;
+    size_t current;
     bool error;
 
     TokenStream():current(0),error(false){
@@ -132,18 +134,18 @@ struct TokenStream {
 
 GonObject::GonObject(){
     name = "";
-    type = g_null;
+    type = Type::Null;
     int_data = 0;
     float_data = 0;
-    bool_data = 0;
+    bool_data = false;
     string_data = "";
 }
 
-GonObject LoadFromTokens(TokenStream& Tokens){
+GonObject GonObject::LoadFromTokens(TokenStream& Tokens){
     GonObject ret;
 
     if(Tokens.Peek() == "{"){         //read object
-        ret.type = GonObject::g_object;
+        ret.type = Type::Object;
 
         Tokens.Read(); //consume '{'
 
@@ -154,48 +156,48 @@ GonObject LoadFromTokens(TokenStream& Tokens){
             ret.children_map[name] = ret.children_array.size()-1;
             ret.children_array[ret.children_array.size()-1].name = name;
 
-            if(Tokens.error) throw "GON ERROR: missing a '}' somewhere";
+            if(Tokens.error) error_callback("GON ERROR: missing a '}' somewhere");
         }
 
         Tokens.Read(); //consume '}'
 
         return ret;
     } else if(Tokens.Peek() == "["){  //read array
-        ret.type = GonObject::g_array;
+        ret.type = Type::Array;
 
         Tokens.Read(); //consume '['
         while(Tokens.Peek() != "]"){
             ret.children_array.push_back(LoadFromTokens(Tokens));
 
-            if(Tokens.error) throw "GON ERROR: missing a ']' somewhere";
+            if(Tokens.error) error_callback("GON ERROR: missing a ']' somewhere");
         }
         Tokens.Read(); //consume ']'
 
         return ret;
     } else {                          //read data value
-        ret.type = GonObject::g_string;
+        ret.type = Type::String;
         ret.string_data = Tokens.Read();
 
         //if string data can be converted to a number, do so
-        char*endptr;
-        ret.int_data = strtol(ret.string_data.c_str(), &endptr, 0);
+        char* endptr;
+        ret.int_data = strtoll(ret.string_data.c_str(), &endptr, 0);
         if(*endptr == 0){
-            ret.type = GonObject::g_number;
+            ret.type = Type::Number;
         }
 
         ret.float_data = strtod(ret.string_data.c_str(), &endptr);
         if(*endptr == 0){
-            ret.type = GonObject::g_number;
+            ret.type = Type::Number;
         }
 
         //if string data can be converted to a bool or null, convert
-        if(ret.string_data == "null") ret.type = GonObject::g_null;
+        if(ret.string_data == "null") ret.type = Type::Null;
         if(ret.string_data == "true") {
-            ret.type = GonObject::g_bool;
+            ret.type = Type::Bool;
             ret.bool_data = true;
         }
         if(ret.string_data == "false") {
-            ret.type = GonObject::g_bool;
+            ret.type = Type::Bool;
             ret.bool_data = false;
         }
 
@@ -205,12 +207,14 @@ GonObject LoadFromTokens(TokenStream& Tokens){
     return ret;
 }
 
-
+void GonObject::DefaultErrorCallback(const char* msg) {
+    throw msg;
+}
 
 GonObject GonObject::Load(std::string filename){
     std::ifstream in(filename.c_str(), std::ios::binary);
     in.seekg (0, std::ios::end);
-    int length = in.tellg();
+    size_t length = in.tellg();
     in.seekg (0, std::ios::beg);
     std::string str(length + 2, '\0');
     in.read(&str[1], length);
@@ -239,166 +243,168 @@ GonObject GonObject::LoadFromBuffer(std::string buffer){
 
 //options with error throwing
 std::string GonObject::String() const {
-    if(type != g_string && type != g_number && type != g_bool) throw "GSON ERROR: Field is not a string";
+    if(type != Type::String && type != Type::Number && type != Type::Bool) error_callback("GSON ERROR: Field is not a string");
     return string_data;
 }
 int GonObject::Int() const {
-    if(type != g_number) throw "GON ERROR: Field is not a number";
-    return int_data;
+    if(type != Type::Number) error_callback("GON ERROR: Field is not a number");
+    return static_cast<int>(int_data);
 }
+
+uint32_t GonObject::UInt() const {
+    if(type != Type::Number) error_callback("GON ERROR: Field is not a number");
+    return static_cast<uint32_t>(int_data);
+}
+
 double GonObject::Number() const {
-    if(type != g_number) throw "GON ERROR: Field is not a number";
+    if(type != Type::Number) error_callback("GON ERROR: Field is not a number");
     return float_data;
 }
 bool GonObject::Bool() const {
-    if(type != g_bool) throw "GON ERROR: Field is not a bool";
+    if(type != Type::Bool) error_callback("GON ERROR: Field is not a bool");
     return bool_data;
 }
 
 //options with a default value
-std::string GonObject::String(std::string _default) const {
-    if(type != g_string && type != g_number && type != g_bool) return _default;
+std::string GonObject::String(const std::string& _default) const {
+    if(type != Type::String && type != Type::Number && type != Type::Bool) return _default;
     return string_data;
 }
 int GonObject::Int(int _default) const {
-    if(type != g_number) return _default;
-    return int_data;
+    if(type != Type::Number) return _default;
+    return static_cast<int>(int_data);
 }
 double GonObject::Number(double _default) const {
-    if(type != g_number) return _default;
+    if(type != Type::Number) return _default;
     return float_data;
 }
 bool GonObject::Bool(bool _default) const {
-    if(type != g_bool) return _default;
+    if(type != Type::Bool) return _default;
     return bool_data;
 }
 
-bool GonObject::Contains(std::string child) const{
-    if(type != g_object) return false;
+bool GonObject::Contains(const std::string& child) const{
+    if(type != Type::Object) return false;
 
-    std::map<std::string, int>::const_iterator iter = children_map.find(child);
-    if(iter != children_map.end()){
-        return true;
-    }
-
-    return false;
+    const auto iter = children_map.find(child);
+    return iter != children_map.end();
 }
 bool GonObject::Contains(int child) const{
-    if(type != g_object && type != g_array) return true;
+    if(type != Type::Array) return true;
 
     if(child < 0) return false;
-    if(child >= children_array.size()) return false;
+    if(static_cast<size_t>(child) >= children_array.size()) return false;
     return true;
 }
 bool GonObject::Exists() const{
-    return type != g_null;
+    return type != Type::Null;
 }
 
-const GonObject& GonObject::operator[](std::string child) const {
-    if(type == g_null) return null_gon;
-    if(type != g_object) throw "GON ERROR: Field is not an object";
+const GonObject& GonObject::operator[](const std::string& child) const {
+    if(type == Type::Null) return null_gon;
+    if(type != Type::Object) error_callback("GON ERROR: Field is not an object");
 
-    std::map<std::string, int>::const_iterator iter = children_map.find(child);
+    const auto iter = children_map.find(child);
     if(iter != children_map.end()){
         return children_array[iter->second];
     }
 
     return null_gon;
-    //throw "GON ERROR: Field not found: "+child;
+    //error_callback("GON ERROR: Field not found: "+child);
 }
 const GonObject& GonObject::operator[](int childindex) const {
-    if(type != g_object && type != g_array) return *this;//throw "GSON ERROR: Field is not an object or array";
+    if(type != Type::Array) error_callback("GSON ERROR: Field is not an array");
     return children_array[childindex];
 }
-int GonObject::Length() const {
-    if(type != g_object && type != g_array) return 1;//size 1, object is self    //throw "GSON ERROR: Field is not an object or array";
+size_t GonObject::Length() const {
+    if(type != Type::Array) error_callback("GSON ERROR: Field is not an array");
     return children_array.size();
 }
 
 
 
 void GonObject::DebugOut(){
-    if(type == g_object){
+    switch (type) {
+    case Type::Null:
+        std::cout << name << " is null " << std::endl;
+        break;
+
+    case Type::String:
+        std::cout << name << " is string \"" << String() << "\"" << std::endl;
+        break;
+
+    case Type::Number:
+        std::cout << name << " is number " << Int() << std::endl;
+        break;
+
+    case Type::Object:
         std::cout << name << " is object {" << std::endl;
-        for(int i = 0; i<children_array.size(); i++){
-            children_array[i].DebugOut();
+        for (auto& i : children_array) {
+            i.DebugOut();
         }
         std::cout << "}" << std::endl;
-    }
+        break;
 
-    if(type == g_array){
+    case Type::Array:
         std::cout << name << " is array [" << std::endl;
-        for(int i = 0; i<children_array.size(); i++){
-            children_array[i].DebugOut();
+        for (auto& i : children_array) {
+            i.DebugOut();
         }
         std::cout << "]" << std::endl;
-    }
+        break;
 
-    if(type == g_string){
-        std::cout << name << " is string \"" << String() << "\"" << std::endl;
-    }
+    case Type::Bool:
+        std::cout << name << " is bool " << Bool() << std::endl;
+        break;
 
-    if(type == g_number){
-        std::cout << name << " is number " << Int() << std::endl;
-    }
-
-    if(type == g_bool){
-        std::cout << name << " is bool " << Bool()<< std::endl;
-    }
-
-    if(type == g_null){
-        std::cout << name << " is null " << std::endl;
+    default: break;
     }
 }
 
 
-void GonObject::Save(std::string filename){
+void GonObject::Save(const std::string& filename){
     std::ofstream outfile(filename);
-    for(int i = 0; i<children_array.size(); i++){
-        outfile << children_array[i].name+" "+children_array[i].getOutStr()+"\n";
+    for (auto& i : children_array) {
+        outfile << i.name+" "+ i.getOutStr()+"\n";
     }
     outfile.close();
 }
 
 std::string GonObject::getOutStr(){
-    std::string out = "";
+    std::string out;
 
-    if(type == g_object){
+    switch (type) {
+    case Type::Null:
+        out += "null";
+        break;
+
+    // If we're a number or bool, we already have a string representation
+    // of our value, thanks to the way we parse the input file
+    case Type::String:
+    case Type::Number:
+    case Type::Bool:
+        out += String();
+        break;
+
+    case Type::Object:
         out += "{\n";
-        for(int i = 0; i<children_array.size(); i++){
-            out += children_array[i].name+" "+children_array[i].getOutStr()+"\n";
+        for (auto& i : children_array) {
+            out += i.name+" "+ i.getOutStr()+"\n";
         }
         out += "}\n";
-    }
+        break;
 
-    if(type == g_array){
+    case Type::Array:
         out += "[";
-        for(int i = 0; i<children_array.size(); i++){
-            out += children_array[i].getOutStr()+" ";
+        for (auto& i : children_array) {
+            out += i.getOutStr()+" ";
         }
         out += "]\n";
-    }
+        break;
 
-    if(type == g_string){
-        out += String();
+    default:
+        break;
     }
-
-    if(type == g_number){
-        out += std::to_string(Int());
-    }
-
-    if(type == g_bool){
-        if(Bool()){
-            out += "true";
-        } else {
-            out += "false";
-        }
-    }
-
-    if(type == g_null){
-        out += "null";
-    }
-
     return out;
 }
 
