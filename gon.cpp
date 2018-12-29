@@ -211,7 +211,7 @@ void GonObject::DefaultErrorCallback(const char* msg) {
     throw msg;
 }
 
-GonObject GonObject::Load(std::string filename){
+GonObject GonObject::Load(const std::string& filename){
     std::ifstream in(filename.c_str(), std::ios::binary);
     in.seekg (0, std::ios::end);
     size_t length = in.tellg();

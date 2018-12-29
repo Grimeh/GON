@@ -39,7 +39,7 @@ class GonObject {
         static ErrorCallback error_callback;
 
     public:
-        static GonObject Load(std::string filename);
+        static GonObject Load(const std::string& filename);
         static GonObject LoadFromBuffer(std::string buffer);
 
         GonObject();
