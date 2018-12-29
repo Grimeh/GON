@@ -213,11 +213,17 @@ void GonObject::DefaultErrorCallback(const char* msg) {
 
 GonObject GonObject::Load(const std::string& filename){
     std::ifstream in(filename.c_str(), std::ios::binary);
+    if (!in.is_open()) {
+        error_callback("Could not open file");
+        return null_gon;
+    }
+
     in.seekg (0, std::ios::end);
     size_t length = in.tellg();
     in.seekg (0, std::ios::beg);
     std::string str(length + 2, '\0');
     in.read(&str[1], length);
+    in.close();
     str.front() = '{';
     str.back() = '}';
 
